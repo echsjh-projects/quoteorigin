@@ -16,12 +16,9 @@ Neon.tech SSL note:
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from config import get_settings
+import re
 
 settings = get_settings()
-
-# Create the async engine (connection pool)
-# pool_pre_ping=True: test connections before use (important for Neon's idle timeout)
-import re
 
 db_url = settings.database_url
 db_url = re.sub(r'[?&]sslmode=\w+', '', db_url)
@@ -35,7 +32,6 @@ engine = create_async_engine(
     connect_args={"ssl": "require"},
 )
 
-# Session factory — call this to get a session object
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
@@ -44,25 +40,16 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 class Base(DeclarativeBase):
-    """All SQLAlchemy models inherit from this."""
     pass
 
 
 async def init_db():
-    """Create all tables. Run once on first deploy."""
-    from database.models import Quote, Source, SearchLog  # noqa: F401 — needed for Base to see them
+    from database.models import Quote, Source, SearchLog  # noqa
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     print("✅ Database tables created.")
 
 
 async def get_db():
-    """
-    FastAPI dependency — injects a DB session into route handlers.
-    Usage in a route:
-        async def my_route(db: AsyncSession = Depends(get_db)):
-            ...
-    The 'async with' ensures the session is always closed after the request.
-    """
     async with AsyncSessionLocal() as session:
         yield session
