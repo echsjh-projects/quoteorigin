@@ -36,14 +36,18 @@ app = FastAPI(
 # This tells the backend to accept requests from your frontend domains.
 # Without this, the browser will block requests from Vercel to Render.
 allowed_origins = [
-    "http://localhost:5173",       # Vite local dev
-    "http://localhost:3000",       # fallback
-    settings.frontend_url,        # your Vercel URL (from .env)
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://quoteorigin.vercel.app",  # hardcode your exact Vercel URL
 ]
+
+# Also allow any Vercel preview URLs
+allowed_origin_regex = r"https://.*\.vercel\.app"
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
