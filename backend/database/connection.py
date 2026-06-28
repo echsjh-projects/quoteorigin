@@ -21,12 +21,18 @@ settings = get_settings()
 
 # Create the async engine (connection pool)
 # pool_pre_ping=True: test connections before use (important for Neon's idle timeout)
+import re
+
+db_url = settings.database_url
+db_url = re.sub(r'[?&]sslmode=\w+', '', db_url)
+
 engine = create_async_engine(
-    settings.database_url,
-    echo=(settings.environment == "development"),  # log SQL in dev only
+    db_url,
+    echo=(settings.environment == "development"),
     pool_pre_ping=True,
     pool_size=5,
     max_overflow=10,
+    connect_args={"ssl": "require"},
 )
 
 # Session factory — call this to get a session object
