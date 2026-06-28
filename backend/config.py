@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     groq_api_key: str
     database_url: str
     news_api_key: str = ""
-    brave_api_key: str = ""
+    tavily_api_key: str = ""
     frontend_url: str = "http://localhost:5173"
     environment: str = "development"
 
