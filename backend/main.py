@@ -20,7 +20,7 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     """Runs on startup and shutdown."""
     # Startup: create DB tables if they don't exist yet
-    await init_db()
+    #await init_db()
     yield
     # Shutdown: nothing to clean up (connection pool handles itself)
 
