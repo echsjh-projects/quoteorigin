@@ -9,10 +9,12 @@ import asyncio
 import time
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from database.connection import get_db
-from database import crud
-from database.schemas import QuoteSearchRequest, SearchResponse
+from database.models import Quote, Source, SearchLog
+from database.schemas import QuoteSearchRequest, SearchResponse, QuoteOut, SourceOut
+from nlp.normalizer import normalize_quote
 from nlp.groq_client import extract_provenance
 from scrapers import (
     search_wikiquote,
@@ -25,90 +27,135 @@ from scrapers import (
 router = APIRouter(prefix="/api/quotes", tags=["quotes"])
 
 
+async def get_sources_for_quote(db: AsyncSession, quote_id: int) -> list[Source]:
+    result = await db.execute(
+        select(Source).where(Source.quote_id == quote_id)
+    )
+    return result.scalars().all()
+
+
+def build_quote_out(quote: Quote, sources: list[Source]) -> QuoteOut:
+    return QuoteOut(
+        id=quote.id,
+        input_text=quote.input_text,
+        original_phrasing=quote.original_phrasing,
+        speaker=quote.speaker,
+        earliest_date=quote.earliest_date,
+        confidence_score=quote.confidence_score,
+        reasoning=quote.reasoning,
+        is_resolved=quote.is_resolved,
+        created_at=quote.created_at,
+        sources=[SourceOut(
+            id=s.id,
+            platform=s.platform,
+            title=s.title,
+            url=s.url,
+            snippet=s.snippet,
+            mentioned_date=s.mentioned_date,
+            speaker_mentioned=s.speaker_mentioned,
+            relevance=s.relevance,
+        ) for s in sources],
+    )
+
+
 @router.post("/search", response_model=SearchResponse)
 async def search_quote(
     request: QuoteSearchRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Main endpoint: given a quote, find its earliest known source.
-
-    Flow:
-      1. Check DB cache — return immediately if already researched
-      2. Fire all scrapers in parallel (asyncio.gather)
-      3. Feed results to Groq LLM for NLP extraction
-      4. Save everything to PostgreSQL
-      5. Return structured response
-    """
     start_ms = int(time.time() * 1000)
+    normalized = normalize_quote(request.quote)
 
     # ── 1. Cache check ────────────────────────────────────────────────────────
-    cached = await crud.get_quote_by_text(db, request.quote)
+    cached_result = await db.execute(
+        select(Quote).where(Quote.normalized_text == normalized)
+    )
+    cached = cached_result.scalar_one_or_none()
+
     if cached and cached.is_resolved:
-        # Explicitly load sources async — never access relationships directly
-        from sqlalchemy import select
-        from database.models import Source
-        source_result = await db.execute(
-            select(Source).where(Source.quote_id == cached.id)
-        )
-        cached.sources = source_result.scalars().all()
-        
+        sources = await get_sources_for_quote(db, cached.id)
         duration = int(time.time() * 1000) - start_ms
-        await crud.log_search(db, request.quote, True, len(cached.sources), duration)
+
+        log = SearchLog(input_text=request.quote, cache_hit=True,
+                       sources_found=len(sources), duration_ms=duration)
+        db.add(log)
+        await db.commit()
+
         return SearchResponse(
-            quote=cached,
+            quote=build_quote_out(cached, sources),
             cache_hit=True,
-            sources_found=len(cached.sources),
+            sources_found=len(sources),
             duration_ms=duration,
         )
 
     # ── 2. Run all scrapers in parallel ───────────────────────────────────────
     results = await asyncio.gather(
-        search_quotable(request.quote),   # fastest — check curated DB first
+        search_quotable(request.quote),
         search_wikiquote(request.quote),
         search_wikipedia(request.quote),
         search_news(request.quote),
         search_web(request.quote),
-        return_exceptions=True,           # don't let one scraper crash everything
+        return_exceptions=True,
     )
 
-    # Flatten results, skip any scrapers that threw exceptions
     all_sources: list[dict] = []
     for batch in results:
         if isinstance(batch, Exception):
-            continue  # log silently in production
+            continue
         all_sources.extend(batch)
 
     if not all_sources:
-        raise HTTPException(
-            status_code=503,
-            detail="All scrapers failed. Please check API keys and try again.",
-        )
+        raise HTTPException(status_code=503, detail="All scrapers failed.")
 
     # ── 3. LLM extraction via Groq ────────────────────────────────────────────
     provenance = await extract_provenance(request.quote, all_sources)
 
     # ── 4. Save to PostgreSQL ─────────────────────────────────────────────────
-    quote = await crud.save_quote(db, request.quote, provenance, all_sources)
+    quote = Quote(
+        normalized_text=normalized,
+        input_text=request.quote,
+        original_phrasing=provenance.get("original_phrasing"),
+        speaker=provenance.get("speaker"),
+        earliest_date=provenance.get("earliest_date"),
+        confidence_score=provenance.get("confidence"),
+        reasoning=provenance.get("reasoning"),
+        is_resolved=True,
+    )
+    db.add(quote)
+    await db.flush()
 
-    # ── 5. Return response ────────────────────────────────────────────────────
+    for s in all_sources:
+        db.add(Source(
+            quote_id=quote.id,
+            platform=s.get("platform", "unknown"),
+            title=s.get("title"),
+            url=s.get("url"),
+            snippet=s.get("snippet"),
+            mentioned_date=s.get("mentioned_date"),
+            speaker_mentioned=s.get("speaker_mentioned"),
+            relevance=s.get("relevance"),
+        ))
+
+    await db.commit()
+
+    sources = await get_sources_for_quote(db, quote.id)
     duration = int(time.time() * 1000) - start_ms
-    await crud.log_search(db, request.quote, False, len(all_sources), duration)
+
+    log = SearchLog(input_text=request.quote, cache_hit=False,
+                   sources_found=len(sources), duration_ms=duration)
+    db.add(log)
+    await db.commit()
 
     return SearchResponse(
-        quote=quote,
+        quote=build_quote_out(quote, sources),
         cache_hit=False,
-        sources_found=len(all_sources),
+        sources_found=len(sources),
         duration_ms=duration,
     )
 
 
 @router.get("/recent")
 async def get_recent_quotes(limit: int = 10, db: AsyncSession = Depends(get_db)):
-    """Return the most recently searched quotes (for the homepage)."""
-    from sqlalchemy import select
-    from database.models import Quote
-
     result = await db.execute(
         select(Quote)
         .where(Quote.is_resolved == True)
@@ -116,4 +163,10 @@ async def get_recent_quotes(limit: int = 10, db: AsyncSession = Depends(get_db))
         .limit(limit)
     )
     quotes = result.scalars().all()
-    return {"quotes": quotes}
+
+    output = []
+    for q in quotes:
+        sources = await get_sources_for_quote(db, q.id)
+        output.append(build_quote_out(q, sources))
+
+    return {"quotes": output}
