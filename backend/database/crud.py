@@ -6,13 +6,12 @@ All database read/write logic lives here, keeping routes clean.
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 from database.models import Quote, Source, SearchLog
 from nlp.normalizer import normalize_quote
 
 
 async def get_quote_by_text(db: AsyncSession, raw_text: str) -> Quote | None:
-    """Look up a quote by its normalized form. Returns None if not found."""
     normalized = normalize_quote(raw_text)
     result = await db.execute(
         select(Quote).where(Quote.normalized_text == normalized)
@@ -26,10 +25,6 @@ async def save_quote(
     provenance: dict,
     sources: list[dict],
 ) -> Quote:
-    """
-    Save a newly researched quote + all its sources to the database.
-    provenance is the dict returned by groq_client.extract_provenance().
-    """
     normalized = normalize_quote(input_text)
 
     quote = Quote(
@@ -43,7 +38,7 @@ async def save_quote(
         is_resolved=True,
     )
     db.add(quote)
-    await db.flush()  # assigns quote.id without committing yet
+    await db.flush()
 
     for s in sources:
         source = Source(
@@ -59,7 +54,18 @@ async def save_quote(
         db.add(source)
 
     await db.commit()
-    await db.refresh(quote)
+
+    # Re-fetch with sources using a fresh query
+    result = await db.execute(
+        select(Quote).where(Quote.id == quote.id)
+    )
+    quote = result.scalar_one()
+    
+    source_result = await db.execute(
+        select(Source).where(Source.quote_id == quote.id)
+    )
+    quote.sources = source_result.scalars().all()
+    
     return quote
 
 
