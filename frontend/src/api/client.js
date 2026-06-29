@@ -26,11 +26,24 @@ async function request(path, options = {}) {
 
 export const api = {
   /** Search for quote provenance */
-  searchQuote: (quote) =>
-    request("/api/quotes/search", {
-      method: "POST",
-      body: JSON.stringify({ quote }),
-    }),
+  searchQuote: async (quote) => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 30000)
+    try {
+      return await request("/api/quotes/search", {
+        method: "POST",
+        body: JSON.stringify({ quote }),
+        signal: controller.signal,
+      })
+    } catch (err) {
+      if (err.name === "AbortError") {
+        throw new Error("Search timed out — the result may still be processing. Try searching again in a few seconds.")
+      }
+      throw err
+    } finally {
+      clearTimeout(timeout)
+    }
+  },
 
   /** Get recently searched quotes for the homepage */
   getRecent: (limit = 8) =>
