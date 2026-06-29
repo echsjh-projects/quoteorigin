@@ -52,7 +52,7 @@ class Quote(Base):
 
     # Relationship: access quote.sources to get all Source rows for this quote
     #sources = relationship("Source", back_populates="quote", cascade="all, delete-orphan")
-    sources = relationship("Source", back_populates="quote", cascade="all, delete-orphan", lazy="raise")
+    #sources = relationship("Source", back_populates="quote", cascade="all, delete-orphan", lazy="raise")
 
 class Source(Base):
     """
@@ -75,7 +75,7 @@ class Source(Base):
     relevance = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
-    quote = relationship("Quote", back_populates="sources")
+    #quote = relationship("Quote", back_populates="sources")
 
 
 class SearchLog(Base):
