@@ -45,6 +45,14 @@ async def search_quote(
     # ── 1. Cache check ────────────────────────────────────────────────────────
     cached = await crud.get_quote_by_text(db, request.quote)
     if cached and cached.is_resolved:
+        # Explicitly load sources async — never access relationships directly
+        from sqlalchemy import select
+        from database.models import Source
+        source_result = await db.execute(
+            select(Source).where(Source.quote_id == cached.id)
+        )
+        cached.sources = source_result.scalars().all()
+        
         duration = int(time.time() * 1000) - start_ms
         await crud.log_search(db, request.quote, True, len(cached.sources), duration)
         return SearchResponse(
