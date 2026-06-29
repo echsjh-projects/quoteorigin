@@ -104,8 +104,20 @@ async def search_quote(
             continue
         all_sources.extend(batch)
 
+    #if not all_sources:
+    #    raise HTTPException(status_code=503, detail="All scrapers failed.")
+
+    # If no scrapers found anything, let Groq use its own knowledge
     if not all_sources:
-        raise HTTPException(status_code=503, detail="All scrapers failed.")
+        all_sources = [{
+            "platform": "llm_knowledge",
+            "title": "LLM internal knowledge",
+            "snippet": "No external sources found. Using LLM training knowledge only.",
+            "url": None,
+            "mentioned_date": None,
+            "speaker_mentioned": None,
+            "relevance": 0.5,
+        }]
 
     # ── 3. LLM extraction via Groq ────────────────────────────────────────────
     provenance = await extract_provenance(request.quote, all_sources)
