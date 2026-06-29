@@ -1,7 +1,7 @@
 from scrapers.wikiquote import search_wikiquote
 from scrapers.wikipedia import search_wikipedia
 from scrapers.newsapi import search_news
-from scrapers.brave_search import search_web
+from scrapers.tavily import search_web
 from scrapers.quotable import search_quotable
 
 __all__ = [
