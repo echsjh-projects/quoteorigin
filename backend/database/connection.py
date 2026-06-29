@@ -25,10 +25,7 @@ db_url = re.sub(r'[?&]sslmode=\w+', '', db_url)
 
 engine = create_async_engine(
     db_url,
-    echo=(settings.environment == "development"),
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
+    echo=False,
     connect_args={"ssl": "require"},
 )
 
@@ -44,10 +41,7 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
-    from database.models import Quote, Source, SearchLog  # noqa
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    print("✅ Database tables created.")
+    pass  # tables created directly in Neon SQL editor
 
 
 async def get_db():
