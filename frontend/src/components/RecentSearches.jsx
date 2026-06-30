@@ -15,8 +15,10 @@ export function RecentSearches({ quotes, onSelect }) {
               <p className="recent-quote-text">
                 "{q.input_text.length > 80 ? q.input_text.slice(0, 80) + "…" : q.input_text}"
               </p>
-              {q.speaker && (
-                <span className="recent-speaker">— {q.speaker}{q.earliest_date ? `, ${q.earliest_date}` : ""}</span>
+              {q.speaker && q.speaker !== "Error" && (
+                <span className="recent-speaker">
+                  — {q.speaker}{q.earliest_date ? `, ${q.earliest_date}` : ""}
+                </span>
               )}
             </div>
             <span className="recent-date">↗</span>
