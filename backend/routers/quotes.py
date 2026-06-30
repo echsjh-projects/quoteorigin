@@ -171,6 +171,8 @@ async def get_recent_quotes(limit: int = 10, db: AsyncSession = Depends(get_db))
     result = await db.execute(
         select(Quote)
         .where(Quote.is_resolved == True)
+        .where(Quote.speaker != "Error")
+        .where(Quote.confidence_score > 0)
         .order_by(Quote.created_at.desc())
         .limit(limit)
     )
